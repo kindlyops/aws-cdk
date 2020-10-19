@@ -806,7 +806,7 @@ export interface BucketProps {
    *
    * @default false
    */
-  readonly enforceSecurityBestPractice: boolean;
+  readonly enforceSecurityBestPractice?: boolean;
 
   /**
    * Physical name of this bucket.
@@ -1011,7 +1011,7 @@ export class Bucket extends BucketBase {
   private readonly notifications: BucketNotifications;
   private readonly metrics: BucketMetrics[] = [];
   private readonly cors: CorsRule[] = [];
-  private readonly blockPublicAccess: BlockPublicAccess;
+  private readonly blockPublicAccess: BlockPublicAccess | undefined;
 
   constructor(scope: Construct, id: string, props: BucketProps = {}) {
     super(scope, id, {
@@ -1023,7 +1023,6 @@ export class Bucket extends BucketBase {
     this.validateBucketName(this.physicalName);
     this.enforceSecurityBestPractice = props.enforceSecurityBestPractice;
     this.blockPublicAccess = props.blockPublicAccess;
-
     // Enforce AWS Foundational Security Best Practice
     if (this.enforceSecurityBestPractice) {
       // Require requests to use Secure Socket Layer
@@ -1173,9 +1172,9 @@ export class Bucket extends BucketBase {
       actions: ['s3:*'],
       effect: iam.Effect.DENY,
       resources: [this.bucketArn, `${this.bucketArn}/*`],
-      principals: [new iam.AnyPrincipal],
+      principals: [new iam.AnyPrincipal()],
     });
-    statement.addCondition('Bool', {"aws:SecureTransport": "false"});
+    statement.addCondition('Bool', {'aws:SecureTransport': 'false'});
     this.addToResourcePolicy(statement);
   }
 
@@ -1241,8 +1240,7 @@ export class Bucket extends BucketBase {
     }
 
     // Ensure SSE is enabled if best practices are enforced.
-    if(this.enforceSecurityBestPractice && encryptionType === BucketEncryption.UNENCRYPTED)
-    {
+    if (this.enforceSecurityBestPractice && encryptionType === BucketEncryption.UNENCRYPTED) {
       encryptionType = BucketEncryption.S3_MANAGED;
     }
 
