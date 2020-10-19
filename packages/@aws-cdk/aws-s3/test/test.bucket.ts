@@ -433,6 +433,32 @@ export = {
     test.done();
   },
 
+  'bucket with aws foundational security best practice'(test: Test) {
+    const stack = new cdk.Stack();
+    new s3.Bucket(stack, 'MyBucket', {
+      enforceSecurityBestPractice: true,
+    });
+
+    expect(stack).toMatch({
+      'Resources': {
+        'MyBucketF68F3FF0': {
+          'Type': 'AWS::S3::Bucket',
+          'DeletionPolicy': 'Retain',
+          'UpdateReplacePolicy': 'Retain',
+          'Properties': {
+            'PublicAccessBlockConfiguration': {
+              'BlockPublicAcls': true,
+              'BlockPublicPolicy': true,
+              'IgnorePublicAcls': true,
+              'RestrictPublicBuckets': true,
+            },
+          },
+        },
+      },
+    });
+
+    test.done();
+  },
   'bucket with custom canned access control'(test: Test) {
     const stack = new cdk.Stack();
     new s3.Bucket(stack, 'MyBucket', {
@@ -1380,6 +1406,52 @@ export = {
                 '/your/file.txt',
               ],
             ],
+          },
+        },
+      },
+    });
+
+    test.done();
+  },
+
+  'enforceSecurityBestPractice creates a bucket policy to enforce ssl'(test: Test) {
+    const stack = new cdk.Stack();
+    const bucket = new s3.Bucket(stack, 'MyBucket', {
+      enforceSecurityBestPractice: true
+    });
+
+    expect(stack).toMatch({
+      'Resources': {
+        'MyBucketF68F3FF0': {
+          'Type': 'AWS::S3::Bucket',
+          'DeletionPolicy': 'Retain',
+          'UpdateReplacePolicy': 'Retain',
+        },
+        'MyBucketPolicyE7FBAC7B': {
+          'Type': 'AWS::S3::BucketPolicy',
+          'Properties': {
+            'Bucket': {
+              'Ref': 'MyBucketF68F3FF0',
+            },
+            'PolicyDocument': {
+              'Statement': [
+                {
+                  'Principal': '*',
+                  'Action': 's3:*',
+                  'Effect': 'Deny',
+                  'Resource': [
+                    bucket.bucketArn,
+                    `${bucket.bucketArn}/*`
+                  ],
+                  'Condition': {
+                    'Bool': {
+                      'aws:SecureTransport': 'false'
+                    }
+                  }
+                },
+              ],
+              'Version': '2012-10-17',
+            },
           },
         },
       },
