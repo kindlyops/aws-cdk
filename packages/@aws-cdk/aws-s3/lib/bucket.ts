@@ -801,6 +801,14 @@ export interface BucketProps {
   readonly encryptionKey?: kms.IKey;
 
   /**
+   * Enforces all of the AWS Foundational Security Best Practices Regarding S3
+   * Details: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-standards-fsbp-controls.html
+   *
+   * @default false
+   */
+  readonly enforceSecurityBestPractice: boolean;
+
+  /**
    * Physical name of this bucket.
    *
    * @default - Assigned by CloudFormation (recommended).
@@ -999,9 +1007,11 @@ export class Bucket extends BucketBase {
   private accessControl?: BucketAccessControl;
   private readonly lifecycleRules: LifecycleRule[] = [];
   private readonly versioned?: boolean;
+  private readonly enforceSecurityBestPractice?: boolean;
   private readonly notifications: BucketNotifications;
   private readonly metrics: BucketMetrics[] = [];
   private readonly cors: CorsRule[] = [];
+  private readonly blockPublicAccess: BlockPublicAccess;
 
   constructor(scope: Construct, id: string, props: BucketProps = {}) {
     super(scope, id, {
@@ -1011,6 +1021,16 @@ export class Bucket extends BucketBase {
     const { bucketEncryption, encryptionKey } = this.parseEncryption(props);
 
     this.validateBucketName(this.physicalName);
+    this.enforceSecurityBestPractice = props.enforceSecurityBestPractice;
+    this.blockPublicAccess = props.blockPublicAccess;
+
+    // Enforce AWS Foundational Security Best Practice
+    if (this.enforceSecurityBestPractice) {
+      // Require requests to use Secure Socket Layer
+      this.enforceSSL();
+      // Block all public access
+      this.blockPublicAccess = BlockPublicAccess.BLOCK_ALL;
+    }
 
     const resource = new CfnBucket(this, 'Resource', {
       bucketName: this.physicalName,
@@ -1018,7 +1038,7 @@ export class Bucket extends BucketBase {
       versioningConfiguration: props.versioned ? { status: 'Enabled' } : undefined,
       lifecycleConfiguration: Lazy.anyValue({ produce: () => this.parseLifecycleConfiguration() }),
       websiteConfiguration: this.renderWebsiteConfiguration(props),
-      publicAccessBlockConfiguration: props.blockPublicAccess,
+      publicAccessBlockConfiguration: this.blockPublicAccess,
       metricsConfigurations: Lazy.anyValue({ produce: () => this.parseMetricConfiguration() }),
       corsConfiguration: Lazy.anyValue({ produce: () => this.parseCorsConfiguration() }),
       accessControl: Lazy.stringValue({ produce: () => this.accessControl }),
@@ -1044,7 +1064,7 @@ export class Bucket extends BucketBase {
     this.bucketDualStackDomainName = resource.attrDualStackDomainName;
     this.bucketRegionalDomainName = resource.attrRegionalDomainName;
 
-    this.disallowPublicAccess = props.blockPublicAccess && props.blockPublicAccess.blockPublicPolicy;
+    this.disallowPublicAccess = this.blockPublicAccess && this.blockPublicAccess.blockPublicPolicy;
     this.accessControl = props.accessControl;
 
     if (props.serverAccessLogsBucket instanceof Bucket) {
@@ -1148,6 +1168,17 @@ export class Bucket extends BucketBase {
     return this.addEventNotification(EventType.OBJECT_REMOVED, dest, ...filters);
   }
 
+  private enforceSSL() {
+    const statement = new iam.PolicyStatement({
+      actions: ['s3:*'],
+      effect: iam.Effect.DENY,
+      resources: [this.bucketArn, `${this.bucketArn}/*`],
+      principals: [new iam.AnyPrincipal],
+    });
+    statement.addCondition('Bool', {"aws:SecureTransport": "false"});
+    this.addToResourcePolicy(statement);
+  }
+
   private validateBucketName(physicalName: string): void {
     const bucketName = physicalName;
     if (!bucketName || Token.isUnresolved(bucketName)) {
@@ -1207,6 +1238,12 @@ export class Bucket extends BucketBase {
     // if encryption key is set, encryption must be set to KMS.
     if (encryptionType !== BucketEncryption.KMS && props.encryptionKey) {
       throw new Error(`encryptionKey is specified, so 'encryption' must be set to KMS (value: ${encryptionType})`);
+    }
+
+    // Ensure SSE is enabled if best practices are enforced.
+    if(this.enforceSecurityBestPractice && encryptionType === BucketEncryption.UNENCRYPTED)
+    {
+      encryptionType = BucketEncryption.S3_MANAGED;
     }
 
     if (encryptionType === BucketEncryption.UNENCRYPTED) {
